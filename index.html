@@ -643,233 +643,233 @@
     }
 
     /* ---------------------------------------------------------
-       VERSION DATA (read from Monday columns)
+       CURRENT SPLICE VERSION MARKER
+       Each day cell carries a small "i" in its top-right corner that
+       reports the Splice version currently live on each network as of
+       that day. A version becomes "current" on the day its upgrade lands
+       and is carried forward on every following day until the next
+       upgrade supersedes it.
 
-       Minimum version information used to be reverse-engineered out of
-       event titles ("DevNet: Validators must upgrade to 0.8.x") and out
-       of description blocks listing DAR components. The board now carries
-       all of it in dedicated columns, which the publisher emits per event:
-
-         minorVersion              "0.8"
-         minValidatorSpliceVersion "0.7.5"
-         minDarVersions            [{ package, version }, ...]
-
-       So nothing here parses text any more. What remains is the part the
-       board cannot express on its own: the columns are sparse — plenty of
-       rows leave them blank — so "the minimum version as of a given day"
-       is the most recent non-blank value on or before that day, carried
-       forward independently per network.
+       Only real version upgrades set the current value: events whose
+       title matches "upgrades to Splice X.Y.Z". Other Splice-related
+       activity types (minimum versions, DAR versions, Daml effectivity)
+       are intentionally ignored here.
        --------------------------------------------------------- */
 
-    // The three networks the version marker reports on, in display order.
+    // The three networks tracked, in display order.
     const SPLICE_NETWORKS = ['DevNet', 'TestNet', 'MainNet'];
 
-    // The Network column is not always one network. These labels map onto
-    // the networks a row actually sets version state for: a row tagged
-    // "All Networks" updates all three, "TestNet + MainNet" updates two.
-    // "N/A" maps to nothing — such rows still render on the calendar, they
-    // just never move the version state.
-    const NETWORK_SCOPE = {
-      'DevNet': ['DevNet'],
-      'TestNet': ['TestNet'],
-      'MainNet': ['MainNet'],
-      'All Networks': SPLICE_NETWORKS,
-      'All': SPLICE_NETWORKS,
-      'TestNet + MainNet': ['TestNet', 'MainNet'],
-      'N/A': []
-    };
+    // Pull the version number out of an upgrade title.
+    // "DevNet upgrades to Splice 0.7.1" -> "0.7.1"; null if not a match.
+    function parseSpliceVersion(event) {
+      const title = String(event.title || '');
 
-    // A Cancelled row describes an upgrade that did not happen, so it should
-    // not advance the version state — it still renders, with its cancelled
-    // styling. Set to false to let cancelled rows count again.
-    const IGNORE_CANCELLED_VERSIONS = true;
+      // Format A: "<Network>: Validators must upgrade to 0.7.x" (and the
+      // LSU variant "...validators must upgrade to >= 0.6.5 before the LSU").
+      // The version token allows an 'x' segment (e.g. 0.7.x), and an
+      // optional ">=" before the number is stripped. The (?<!not\s)
+      // lookbehind still guards against a negated "not Validators".
+      let match = title.match(
+        /(?<!not\s)validators\s+must\s+upgrade\s+to\s+>?=?\s*(\d+(?:\.[\dx]+)*)/i);
+      if (match) return match[1];
 
-    // Monday returns null, "" and "   " interchangeably for an empty cell,
-    // so every read of a version field goes through this.
-    function hasValue(value) {
-      return value !== null && value !== undefined && String(value).trim() !== '';
+      // Format B: the existing weekly "<Network> Validators upgrade to
+      // Splice N". "Validators remain on..." is not matched (no "upgrade
+      // to"), so a version carries forward until the next real upgrade.
+      match = title.match(
+        /(?<!not\s)validators\s+upgrade\s+to\s+splice\s+(\d+(?:\.\d+)*)/i);
+      return match ? match[1] : null;
     }
 
-    // Compare two dotted version strings numerically: "0.6.10" > "0.6.9".
-    // An 'x' segment ("0.7.x") counts as 0, so an exact patch version always
-    // beats the vaguer minor-only form for the same minor release.
-    // Returns a negative number, 0, or a positive number.
-    function compareVersions(a, b) {
-      const segmentsA = String(a).split('.');
-      const segmentsB = String(b).split('.');
-      const length = Math.max(segmentsA.length, segmentsB.length);
-
-      for (let i = 0; i < length; i++) {
-        const numberA = parseInt(segmentsA[i], 10) || 0;
-        const numberB = parseInt(segmentsB[i], 10) || 0;
-        if (numberA !== numberB) return numberA - numberB;
-      }
-      return 0;
-    }
-
-    // Which networks an event sets version state for. Returns [] for rows
-    // that should not contribute at all.
-    function versionScope(event) {
-      if (IGNORE_CANCELLED_VERSIONS && event.status === 'Cancelled') return [];
-      const label = normalizeNetwork(event.network) || event.network;
-      return NETWORK_SCOPE[label] || NETWORK_SCOPE[event.network] || [];
-    }
-
-    // The minimum validator version an event declares.
-    // Prefers the exact patch version ("0.7.5"); falls back to the minor
-    // version rendered as "0.7.x" when only that column is filled, which is
-    // the wording the tooltip used before these columns existed.
-    function eventMinVersion(event) {
-      if (hasValue(event.minValidatorSpliceVersion)) {
-        return String(event.minValidatorSpliceVersion).trim();
-      }
-      if (hasValue(event.minorVersion)) {
-        return String(event.minorVersion).trim() + '.x';
-      }
-      return null;
-    }
-
-    // An event's DAR components as [[package, version], ...] — the shape the
-    // tooltip and Day view already expect. Empty array when the cell is blank.
-    function eventDarPairs(event) {
-      const list = Array.isArray(event.minDarVersions) ? event.minDarVersions : [];
-      return list
-        .filter(entry => entry && hasValue(entry.package) && hasValue(entry.version))
-        .map(entry => [String(entry.package).trim(), String(entry.version).trim()]);
-    }
-
-    /* ---------------------------------------------------------
-       VERSION TIMELINE
-       One pass over every event builds, per network, a date-ordered list
-       of { dateKey, version, dar } records. Both lookups below then read
-       from it, so the whole schedule is walked once per render session
-       rather than once per day cell.
-
-       Several rows can land on the same day for the same network and
-       disagree — a weekly upgrade row and a minimum-version row, for
-       instance. The row declaring the HIGHEST version wins the day, and
-       its DAR list wins with it, so the two numbers shown in the tooltip
-       always come from the same board row instead of being stitched
-       together from different ones.
-       --------------------------------------------------------- */
-
-    let _versionTimeline = null;
-
-    function buildVersionTimeline() {
-      if (_versionTimeline) return _versionTimeline;
-
-      // Stage 1: collect the winning record per network per day.
-      // Shape: { DevNet: { "2026-09-14": {version, dar}, ... }, ... }
-      const byNetwork = {};
-      SPLICE_NETWORKS.forEach(network => { byNetwork[network] = {}; });
-
-      allEvents.forEach(event => {
-        const version = eventMinVersion(event);
-        const dar = eventDarPairs(event);
-        if (!version && !dar.length) return;      // nothing to contribute
-
-        const dayKey = eventDatePart(event);
-        if (!dayKey) return;
-
-        versionScope(event).forEach(network => {
-          const days = byNetwork[network];
-          const existing = days[dayKey];
-
-          // First record for this day, or this row declares a higher
-          // version than the one already held — take it wholesale.
-          const isHigher = existing && version && existing.version &&
-            compareVersions(version, existing.version) > 0;
-
-          if (!existing || isHigher) {
-            days[dayKey] = { version: version, dar: dar };
-            return;
-          }
-
-          // Same day, not a higher version: keep the incumbent's version but
-          // fill in a DAR list if the incumbent had none. Better a DAR list
-          // from a sibling row than no DAR list at all.
-          if (!existing.dar.length && dar.length) existing.dar = dar;
-          if (!existing.version && version) existing.version = version;
-        });
-      });
-
-      // Stage 2: flatten each network's map into a date-sorted array.
-      const timeline = {};
-      SPLICE_NETWORKS.forEach(network => {
-        timeline[network] = Object.keys(byNetwork[network])
-          .sort()                                  // ISO dates sort lexically
-          .map(dayKey => ({
-            dateKey: dayKey,
-            version: byNetwork[network][dayKey].version,
-            dar: byNetwork[network][dayKey].dar
-          }));
-      });
-
-      _versionTimeline = timeline;
-      return timeline;
-    }
-
-    // Discard the cached timeline. Call this if allEvents is ever reloaded
-    // without a page refresh, otherwise the marker keeps showing stale data.
-    function resetVersionTimeline() {
-      _versionTimeline = null;
-    }
-
-    /**
-     * Minimum validator Splice version per network as of a given day.
-     * Returns { DevNet: "0.7.5"|null, TestNet: ..., MainNet: ... }.
-     *
-     * This intentionally ignores the active network/type/search filters —
-     * the marker always reports the true state of every network regardless
-     * of what the user has narrowed the grid to.
-     */
+    // Build a lookup of the current Splice version per network for a given
+    // day. For each network we take the most recent upgrade whose date is
+    // on or before `key`. Networks with no prior upgrade return null.
+    //
+    // Note: this scans ALL events, ignoring the active network/type/search
+    // filters on purpose — the marker always reports the true live version
+    // on every network regardless of what the user has filtered the grid to.
     function currentSpliceVersions(key) {
-      const timeline = buildVersionTimeline();
+      const target = parseDateKey(key);            // the day we're asking about
       const result = {};
 
       SPLICE_NETWORKS.forEach(network => {
-        let carried = null;
+        let bestDate = null;                       // date of the winning upgrade
+        let bestVersion = null;                    // its version string
 
-        // Records are date-sorted, so walking forward and keeping the last
-        // match at or before `key` gives the carried-forward value.
-        timeline[network].forEach(record => {
-          if (record.dateKey > key) return;        // hasn't happened yet
-          if (record.version) carried = record.version;
+        allEvents.forEach(event => {
+          if (normalizeNetwork(event.network) !== network) return;
+
+          const version = parseSpliceVersion(event);
+          if (!version) return;                    // not an upgrade event
+
+          const eventDate = parseDateKey(eventDatePart(event));
+          if (eventDate > target) return;          // hasn't happened yet on this day
+
+          // Keep the latest upgrade at or before the target day.
+          if (bestDate === null || eventDate > bestDate) {
+            bestDate = eventDate;
+            bestVersion = version;
+          }
         });
 
-        result[network] = carried;
+        result[network] = bestVersion;             // null if no upgrade yet
       });
 
       return result;
     }
 
-    /**
-     * Minimum DAR component set per network as of a given day.
-     * Returns { DevNet: { components: [[pkg, ver], ...], dateKey }, ... },
-     * where dateKey is the day the set came from — the tooltip links to it
-     * so the full list can be read in the Day view.
-     *
-     * Carried forward separately from the version above: a row may declare a
-     * version without a DAR list, and the last known DAR set should survive
-     * that rather than blanking out.
-     */
+    /* ---------------------------------------------------------
+       CURRENT DAR VERSIONS (per network, carry-forward)
+       Parallel to currentSpliceVersions, but for the minimum Splice
+       ".dar" component versions. These come from network-tagged events
+       of type "Minimum Splice Dar versions", whose description lists
+       component/version pairs (amulet 0.1.22, wallet 0.1.23, ...).
+
+       Only network-tagged DAR events are used (the untagged, all-in-one
+       description events are intentionally ignored — too inconsistent to
+       attribute reliably). Like Splice versions, the most recent DAR set
+       on or before a day carries forward until the next one supersedes it.
+       --------------------------------------------------------- */
+
+    // Pull component/version pairs out of a DAR event's description.
+    // Returns an array of [component, version], or [] if none found.
+    /* ---------------------------------------------------------
+       DAR VERSION INDEX
+       The Monday board expresses minimum ".dar" component versions in TWO
+       different shapes, so we build a per-day index once, then carry the
+       latest set forward per network.
+
+       Format A (June 16 style): a single event whose DESCRIPTION contains
+         "DevNet:\n amulet 0.1.19 ...\n TestNet:\n ...".
+
+       Format B (June 30 / July 7 / July 14 style): many sibling events on
+         the SAME DAY, each with an empty description — a "DevNet:" header
+         event, then separate events titled "amulet 0.1.20",
+         "amuletNameService 0.1.21", etc., then "TestNet:", and so on.
+         Components belong to the most recent network-header event seen in
+         document order that day.
+
+       Also handles a single network-tagged event whose description holds
+       the list (Aug 10 TestNet). Unlabeled component lists with no network
+       context are ignored.
+       --------------------------------------------------------- */
+
+    // Recognise a "DevNet:" / "TestNet:" / "MainNet:" header (title only).
+    function darNetworkHeader(title) {
+      const m = String(title || '').trim().match(/^(DevNet|TestNet|MainNet)\s*:?\s*$/i);
+      return m ? normalizeNetwork(m[1]) : null;
+    }
+
+    // Recognise a bare "component 0.1.20" title → [comp, ver] or null.
+    function darComponentTitle(title) {
+      const m = String(title || '').trim().match(/^([A-Za-z][A-Za-z]+)\s+(\d+\.\d+\.\d+)\s*$/);
+      return m ? [m[1], m[2]] : null;
+    }
+
+    // Extract per-network component lists from a single description (Format
+    // A / Aug 10). Returns { DevNet: [[c,v]...], ... } or {}.
+    function darFromDescription(event) {
+      const desc = String(event.description || '');
+      if (!desc) return {};
+      const compRe = /([A-Za-z][A-Za-z]+)\s+(\d+\.\d+\.\d+)/g;
+      const result = {};
+      const netRe = /(DevNet|TestNet|MainNet)\s*:/gi;
+      const labels = [];
+      let m;
+      while ((m = netRe.exec(desc)) !== null) {
+        labels.push({ net: normalizeNetwork(m[1]), start: m.index, end: netRe.lastIndex });
+      }
+      if (labels.length) {
+        for (let i = 0; i < labels.length; i++) {
+          const segEnd = (i + 1 < labels.length) ? labels[i + 1].start : desc.length;
+          const seg = desc.slice(labels[i].end, segEnd);
+          const pairs = [];
+          const re = new RegExp(compRe.source, 'g');
+          let c;
+          while ((c = re.exec(seg)) !== null) pairs.push([c[1], c[2]]);
+          if (pairs.length) result[labels[i].net] = pairs;
+        }
+      } else if (event.network) {
+        const pairs = [];
+        let c;
+        while ((c = compRe.exec(desc)) !== null) pairs.push([c[1], c[2]]);
+        if (pairs.length) result[normalizeNetwork(event.network)] = pairs;
+      }
+      return result;
+    }
+
+    // Build { dateKey: { DevNet:[[c,v]...], TestNet:[...], MainNet:[...] } }
+    // across the whole schedule, merging both formats. Cached after first
+    // build since allEvents doesn't change within a render session.
+    let _darIndex = null;
+    function buildDarIndex() {
+      if (_darIndex) return _darIndex;
+      const index = {};
+
+      // Walk events in document order so Format B header→component grouping
+      // works. Track the current network header within each day.
+      let currentDay = null;
+      let currentNet = null;
+
+      allEvents.forEach(event => {
+        const dayKey = eventDatePart(event);
+        if (dayKey !== currentDay) { currentDay = dayKey; currentNet = null; }
+
+        // Format A / Aug 10: description carries the whole thing.
+        const fromDesc = darFromDescription(event);
+        if (Object.keys(fromDesc).length) {
+          index[dayKey] = index[dayKey] || {};
+          Object.entries(fromDesc).forEach(([net, pairs]) => {
+            index[dayKey][net] = (index[dayKey][net] || []).concat(pairs);
+          });
+          return;
+        }
+
+        // Format B: header event sets the current network for the day.
+        const header = darNetworkHeader(event.title);
+        if (header) { currentNet = header; return; }
+
+        // Format B: component-title event → attach to current network.
+        const comp = darComponentTitle(event.title);
+        if (comp && currentNet) {
+          index[dayKey] = index[dayKey] || {};
+          index[dayKey][currentNet] = (index[dayKey][currentNet] || []);
+          index[dayKey][currentNet].push(comp);
+        }
+      });
+
+      _darIndex = index;
+      return index;
+    }
+
+    // For a given day, the current DAR set per network: the most recent
+    // DAR entry (on or before that day) that has data for that network,
+    // carried forward. Returns { DevNet: { components, dateKey }, ... }.
     function currentDarVersions(key) {
-      const timeline = buildVersionTimeline();
+      const index = buildDarIndex();
+      const target = parseDateKey(key);
       const result = {};
 
       SPLICE_NETWORKS.forEach(network => {
-        let components = [];
-        let sourceKey = null;
+        let bestDate = null;
+        let bestComponents = [];
+        let bestKey = null;
 
-        timeline[network].forEach(record => {
-          if (record.dateKey > key) return;
-          if (record.dar.length) {
-            components = record.dar;
-            sourceKey = record.dateKey;
+        Object.keys(index).forEach(dayKey => {
+          const pairs = index[dayKey][network];
+          if (!pairs || !pairs.length) return;
+
+          const eventDate = parseDateKey(dayKey);
+          if (eventDate > target) return;
+
+          if (bestDate === null || eventDate > bestDate) {
+            bestDate = eventDate;
+            bestComponents = pairs;
+            bestKey = dayKey;
           }
         });
 
-        result[network] = { components: components, dateKey: sourceKey };
+        result[network] = { components: bestComponents, dateKey: bestKey };
       });
 
       return result;
@@ -926,13 +926,14 @@
         tip.appendChild(row);
       });
 
-      // DAR section: every network that has DAR data gets a labelled block
-      // listing each package and its minimum version. The set is carried
-      // forward from the most recent day that declared one, so each block
-      // is footnoted with the day it came from — clicking that opens the
-      // Day view for it. Networks with no DAR data are omitted entirely.
+      // DAR section (Option B): one expandable row per network that has
+      // DAR data. The row shows the network + component count; clicking it
+      // toggles the full [name, version] list open/closed. The first
+      // network with data starts expanded so the tooltip is useful at a
+      // glance while staying short. Networks with no DAR data are omitted.
       const darRows = JSON.parse(marker.dataset.dar || '[]');
-      const darWithData = darRows.filter(([, components]) => components.length > 0);
+      const darWithData = darRows.filter(([, components]) =>
+        Array.isArray(components) && components.length > 0);
 
       if (darWithData.length) {
         const darHeader = document.createElement('div');
@@ -940,44 +941,68 @@
         darHeader.textContent = 'Minimum DAR versions:';
         tip.appendChild(darHeader);
 
-        darWithData.forEach(([network, components, sourceKey]) => {
+        darWithData.forEach(([network, components, sourceKey], idx) => {
+          // Group wrapper for this network (header row + collapsible list).
           const group = document.createElement('div');
-          group.className = 'splice-dar-group';
+          group.className = 'splice-dar-group ' + networkClass(network);
 
-          // Network name heads the block; packages are indented beneath it.
-          const label = document.createElement('div');
-          label.className = 'splice-dar-net ' + networkClass(network);
-          label.textContent = network;
-          group.appendChild(label);
+          // Clickable header row: network name + count + chevron.
+          const head = document.createElement('div');
+          head.className = 'splice-dar-toggle';
+          const name = document.createElement('span');
+          name.className = 'splice-tooltip-net ' + networkClass(network);
+          name.textContent = network;
+          const meta = document.createElement('span');
+          meta.className = 'splice-dar-count';
+          meta.innerHTML = components.length + ' components ' +
+            '<span class="splice-dar-chevron">›</span>';
+          head.appendChild(name);
+          head.appendChild(meta);
+          group.appendChild(head);
 
-          components.forEach(([packageName, version]) => {
-            const row = document.createElement('div');
-            row.className = 'splice-tooltip-row splice-dar-row';
-
-            const name = document.createElement('span');
-            name.className = 'splice-dar-pkg';
-            name.textContent = packageName;
-
-            const value = document.createElement('span');
-            value.className = 'splice-tooltip-ver';
-            value.textContent = version;
-
-            row.appendChild(name);
-            row.appendChild(value);
-            group.appendChild(row);
+          // Collapsible body: the full component list.
+          const body = document.createElement('div');
+          body.className = 'splice-dar-body';
+          components.forEach(([comp, ver]) => {
+            const line = document.createElement('div');
+            line.className = 'splice-dar-comp';
+            const c = document.createElement('span');
+            c.className = 'splice-dar-comp-name';
+            c.textContent = comp;
+            const v = document.createElement('span');
+            v.className = 'splice-tooltip-ver';
+            v.textContent = ver;
+            line.appendChild(c);
+            line.appendChild(v);
+            body.appendChild(line);
           });
 
-          // Provenance line. Clicking jumps to the day the set was declared.
+          // A small "view source day" link at the end of the list, if we
+          // know which day this DAR set came from.
           if (sourceKey) {
-            const source = document.createElement('div');
-            source.className = 'splice-dar-source splice-dar-link';
-            source.textContent = 'set ' + sourceKey + ' \u2192';
-            source.addEventListener('click', () => {
+            const jump = document.createElement('div');
+            jump.className = 'splice-dar-jump';
+            jump.textContent = 'View ' + sourceKey + ' →';
+            jump.addEventListener('click', ev => {
+              ev.stopPropagation();
               hideSpliceTooltip();
-              jumpToDate(sourceKey);   // opens Day view at that date
+              jumpToDate(sourceKey);
             });
-            group.appendChild(source);
+            body.appendChild(jump);
           }
+
+          group.appendChild(body);
+
+          // First network starts expanded; the rest collapsed.
+          if (idx === 0) group.classList.add('expanded');
+
+          // Toggle open/closed on header click. Re-position after, since
+          // the height changes.
+          head.addEventListener('click', ev => {
+            ev.stopPropagation();
+            group.classList.toggle('expanded');
+            positionSpliceTooltip(marker);
+          });
 
           tip.appendChild(group);
         });
@@ -999,24 +1024,39 @@
       // Make it measurable, then position relative to the marker.
       tip.classList.add('visible');
       tip.classList.toggle('pinned', spliceTooltipPinned);
+      positionSpliceTooltip(marker);
+    }
+
+    // Position the (already-populated, visible) tooltip relative to its
+    // marker. Called on open and again after an expand/collapse changes the
+    // height. A max-height with internal scroll (see CSS) guarantees it can
+    // never run off-screen even when every network is expanded.
+    function positionSpliceTooltip(marker) {
+      const tip = spliceTooltipEl;
+      if (!tip) return;
+
+      // Cap the height to the space available above/below the marker so the
+      // tooltip always fits; its own overflow:auto then scrolls if needed.
       const m = marker.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - m.bottom - 12;
+      const spaceAbove = m.top - 12;
+      const placeBelow = spaceBelow >= spaceAbove;
+      const avail = Math.max(placeBelow ? spaceBelow : spaceAbove, 160);
+      tip.style.maxHeight = avail + 'px';
+
       const t = tip.getBoundingClientRect();
 
-      // Default: below the "i", right-aligned to it.
+      // Horizontal: right-aligned to the "i", clamped on-screen.
       let left = m.right - t.width;
-      let top = m.bottom + 6;
-
-      // Keep it on-screen horizontally.
       if (left < 6) left = 6;
       if (left + t.width > window.innerWidth - 6) {
         left = window.innerWidth - 6 - t.width;
       }
-      // If it would go off the bottom, flip above the "i".
-      if (top + t.height > window.innerHeight - 6) {
-        top = m.top - t.height - 6;
-      }
 
-      // position: fixed => use viewport coordinates directly.
+      // Vertical: below if there's room, otherwise above.
+      let top = placeBelow ? m.bottom + 6 : m.top - t.height - 6;
+      if (top < 6) top = 6;
+
       tip.style.left = left + 'px';
       tip.style.top = top + 'px';
     }
@@ -1039,10 +1079,9 @@
       const rows = SPLICE_NETWORKS.map(network =>
         [network, versions[network] || '—']);
 
-      // DAR data per network: [network, componentCount, sourceDateKey].
-      // Full lists live in the Day view; the tooltip shows a count and
-      // links to the day the data came from. sourceDateKey is null when a
-      // network has no DAR data.
+      // DAR data per network: [network, components, sourceDateKey], where
+      // components is the full [name, version] list. The tooltip (Option B)
+      // shows each network as an expandable row revealing these components.
       const dar = currentDarVersions(key);
       const darRows = SPLICE_NETWORKS.map(network => {
         const entry = dar[network] || { components: [], dateKey: null };

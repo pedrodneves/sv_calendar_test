@@ -441,6 +441,8 @@ select::-ms-expand { display: none; }
   pointer-events: none;   /* never intercepts the mouse */
   opacity: 0;
   visibility: hidden;     /* instant hide; no fade delay */
+  overflow-y: auto;       /* safety net: scroll if taller than the cap */
+  overscroll-behavior: contain;
 }
 
 .splice-tooltip.visible {
@@ -466,6 +468,67 @@ select::-ms-expand { display: none; }
 .splice-tooltip.pinned .splice-dar-link:hover {
   background: rgba(124, 77, 255, 0.25);
 }
+
+/* ---- Option B: expandable DAR groups per network ---------------- */
+.splice-dar-group {
+  border: 1px solid rgba(124, 77, 255, 0.18);
+  border-radius: 8px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+/* A network header row — click to expand/collapse its components. */
+.splice-dar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+.splice-tooltip.pinned .splice-dar-toggle:hover {
+  background: rgba(124, 77, 255, 0.12);
+}
+.splice-dar-count {
+  font-size: 11px;
+  color: #9a93b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.splice-dar-chevron {
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.splice-dar-group.expanded .splice-dar-chevron {
+  transform: rotate(90deg);   /* › points down when open */
+}
+
+/* Collapsible body: hidden until the group is expanded. */
+.splice-dar-body {
+  display: none;
+  padding: 2px 10px 8px;
+}
+.splice-dar-group.expanded .splice-dar-body {
+  display: block;
+}
+.splice-dar-comp {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 12px;
+  line-height: 1.9;
+}
+.splice-dar-comp-name { color: #9a93b8; }
+.splice-dar-jump {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #b79cff;
+  cursor: pointer;
+}
+.splice-tooltip.pinned .splice-dar-jump:hover { text-decoration: underline; }
 
 /* Header sits above the network rows, separated by a hairline rule. */
 .splice-tooltip-header {
@@ -1013,67 +1076,4 @@ select::-ms-expand { display: none; }
     flex-direction: column;
     gap: 8px;
   }
-}
-
-/* ---- DAR package list inside the version tooltip -------------
-   The tooltip used to show only a count ("6 DAR versions") and link
-   out to the Day view. It now lists every package inline, grouped by
-   network, so the whole minimum set is readable without navigating
-   away. Each group keeps a small provenance line naming the day the
-   set was declared, since a set is usually carried forward from an
-   earlier day rather than set on the day being viewed. -------- */
-
-/* One network's block: its name, its packages, its provenance line. */
-.splice-dar-group {
-  margin-bottom: 9px;
-}
-.splice-dar-group:last-of-type {
-  margin-bottom: 0;
-}
-
-/* Network name heading a block. Colours match the rows above it so the
-   same network reads as the same colour throughout the tooltip. */
-.splice-dar-net {
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.9;
-}
-.splice-dar-net.devnet  { color: #6ea8ff; }
-.splice-dar-net.testnet { color: #e6c34a; }
-.splice-dar-net.mainnet { color: #4caf7d; }
-
-/* Package rows sit indented under their network heading. */
-.splice-dar-row {
-  padding-left: 10px;
-  line-height: 1.6;
-}
-
-/* Package names are secondary to their version numbers, which are the
-   thing being looked up. */
-.splice-dar-pkg {
-  color: var(--muted);
-  font-weight: 400;
-}
-
-/* "set 2026-09-14 →" — which day this set came from. */
-.splice-dar-source {
-  padding-left: 10px;
-  margin-top: 2px;
-  font-size: 10px;
-  color: var(--purple-soft);
-  opacity: 0.75;
-  cursor: pointer;
-}
-.splice-tooltip.pinned .splice-dar-source:hover {
-  opacity: 1;
-  text-decoration: underline;
-}
-
-/* With three networks listed in full the tooltip is much taller than
-   before, so it gets a scroll ceiling rather than running off-screen.
-   Only a pinned tooltip can be scrolled, since an unpinned one does not
-   receive pointer events. */
-.splice-tooltip {
-  max-height: 70vh;
-  overflow-y: auto;
 }
