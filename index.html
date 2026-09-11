@@ -838,6 +838,23 @@
         }
       });
 
+      // De-duplicate components per network per day. Some days carry the DAR
+      // list in BOTH formats — a set of component-title events AND a summary
+      // event whose description repeats the same list (e.g. 2026-06-16) —
+      // which would otherwise show each component twice ("12 components").
+      // Keep the first occurrence of each component name per network.
+      Object.keys(index).forEach(dayKey => {
+        Object.keys(index[dayKey]).forEach(net => {
+          const seen = new Set();
+          index[dayKey][net] = index[dayKey][net].filter(([name]) => {
+            const key = name.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        });
+      });
+
       _darIndex = index;
       return index;
     }
