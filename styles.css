@@ -380,13 +380,23 @@ select::-ms-expand { display: none; }
   border-color: var(--purple-soft);
   background: rgba(124, 77, 255, 0.15);
 }
+/* Fixed width so the arrows don't shift as the date text length changes
+   (e.g. "May 1" vs "September 12"). The date is centered within it, and
+   the "i" marker is pinned to the right edge, aligned with the date. */
 .list-nav-date {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
+  width: 460px;
+  max-width: 60vw;
+  position: relative;
 }
-/* The date font in the nav bar matches the old title size. */
 .list-nav-date > span:first-child { white-space: nowrap; }
+.list-nav-date .splice-marker {
+  position: absolute;
+  right: 0;            /* pin "i" to the right, aligned with the date row */
+}
 
 /* ---- Month grid -------------------------------------------- */
 .weekdays,
@@ -683,13 +693,14 @@ select::-ms-expand { display: none; }
   padding: 8px 0;
 }
 
-/* Centered empty state for the list view — fills the agenda area and
-   centers the message vertically and horizontally. */
-.empty-note-centered {
+/* Empty state for the list view — spans both grid columns and centers the
+   message across the full width, so it lines up under the date title. */
+.empty-note-fullwidth {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 160px;
+  min-height: 180px;
   padding: 24px;
   font-size: 15px;
   text-align: center;

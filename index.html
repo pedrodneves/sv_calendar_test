@@ -1763,32 +1763,31 @@
       periodTitle.appendChild(dateWrap);
       periodTitle.appendChild(nextBtn);
 
-      // --- Left: mini calendar (jump to any day) ---
-      root.appendChild(buildMiniCalendar());
-
-      // --- Right: agenda for the SELECTED DAY only ---
-      const agenda = document.createElement('div');
-      agenda.className = 'agenda';
-
       // Events on the selected day (eventsOnDate already applies filters).
       const dayEvents = eventsOnDate(dayKey);
 
-      const block = document.createElement('div');
-      block.className = 'agenda-day';
-
       if (dayEvents.length) {
-        // No per-day date heading here anymore — the title bar shows it.
-        renderGroupedByType(block, dayEvents, { showConnected: true });
-      } else {
-        // Centered empty state for a day with no events.
-        const note = document.createElement('div');
-        note.className = 'empty-note empty-note-centered';
-        note.textContent = 'No events on this day.';
-        block.appendChild(note);
-      }
+        // --- Left: mini calendar (jump to any day) ---
+        root.appendChild(buildMiniCalendar());
 
-      agenda.appendChild(block);
-      root.appendChild(agenda);
+        // --- Right: agenda for the SELECTED DAY only ---
+        const agenda = document.createElement('div');
+        agenda.className = 'agenda';
+        const block = document.createElement('div');
+        block.className = 'agenda-day';
+        renderGroupedByType(block, dayEvents, { showConnected: true });
+        agenda.appendChild(block);
+        root.appendChild(agenda);
+      } else {
+        // Empty day: mini calendar still available on the left, and the
+        // "No events" note centered across the FULL width so it lines up
+        // under the white date title above.
+        root.appendChild(buildMiniCalendar());
+        const note = document.createElement('div');
+        note.className = 'empty-note empty-note-fullwidth';
+        note.textContent = 'No events on this day.';
+        root.appendChild(note);
+      }
     }
 
     // "Jul 6, 2026" style label used in the list title.
