@@ -643,233 +643,233 @@
     }
 
     /* ---------------------------------------------------------
-       CURRENT SPLICE VERSION MARKER
-       Each day cell carries a small "i" in its top-right corner that
-       reports the Splice version currently live on each network as of
-       that day. A version becomes "current" on the day its upgrade lands
-       and is carried forward on every following day until the next
-       upgrade supersedes it.
+       VERSION DATA (read from Monday columns)
 
-       Only real version upgrades set the current value: events whose
-       title matches "upgrades to Splice X.Y.Z". Other Splice-related
-       activity types (minimum versions, DAR versions, Daml effectivity)
-       are intentionally ignored here.
+       Minimum version information used to be reverse-engineered out of
+       event titles ("DevNet: Validators must upgrade to 0.8.x") and out
+       of description blocks listing DAR components. The board now carries
+       all of it in dedicated columns, which the publisher emits per event:
+
+         minorVersion              "0.8"
+         minValidatorSpliceVersion "0.7.5"
+         minDarVersions            [{ package, version }, ...]
+
+       So nothing here parses text any more. What remains is the part the
+       board cannot express on its own: the columns are sparse — plenty of
+       rows leave them blank — so "the minimum version as of a given day"
+       is the most recent non-blank value on or before that day, carried
+       forward independently per network.
        --------------------------------------------------------- */
 
-    // The three networks tracked, in display order.
+    // The three networks the version marker reports on, in display order.
     const SPLICE_NETWORKS = ['DevNet', 'TestNet', 'MainNet'];
 
-    // Pull the version number out of an upgrade title.
-    // "DevNet upgrades to Splice 0.7.1" -> "0.7.1"; null if not a match.
-    function parseSpliceVersion(event) {
-      const title = String(event.title || '');
+    // The Network column is not always one network. These labels map onto
+    // the networks a row actually sets version state for: a row tagged
+    // "All Networks" updates all three, "TestNet + MainNet" updates two.
+    // "N/A" maps to nothing — such rows still render on the calendar, they
+    // just never move the version state.
+    const NETWORK_SCOPE = {
+      'DevNet': ['DevNet'],
+      'TestNet': ['TestNet'],
+      'MainNet': ['MainNet'],
+      'All Networks': SPLICE_NETWORKS,
+      'All': SPLICE_NETWORKS,
+      'TestNet + MainNet': ['TestNet', 'MainNet'],
+      'N/A': []
+    };
 
-      // Format A: "<Network>: Validators must upgrade to 0.7.x" (and the
-      // LSU variant "...validators must upgrade to >= 0.6.5 before the LSU").
-      // The version token allows an 'x' segment (e.g. 0.7.x), and an
-      // optional ">=" before the number is stripped. The (?<!not\s)
-      // lookbehind still guards against a negated "not Validators".
-      let match = title.match(
-        /(?<!not\s)validators\s+must\s+upgrade\s+to\s+>?=?\s*(\d+(?:\.[\dx]+)*)/i);
-      if (match) return match[1];
+    // A Cancelled row describes an upgrade that did not happen, so it should
+    // not advance the version state — it still renders, with its cancelled
+    // styling. Set to false to let cancelled rows count again.
+    const IGNORE_CANCELLED_VERSIONS = true;
 
-      // Format B: the existing weekly "<Network> Validators upgrade to
-      // Splice N". "Validators remain on..." is not matched (no "upgrade
-      // to"), so a version carries forward until the next real upgrade.
-      match = title.match(
-        /(?<!not\s)validators\s+upgrade\s+to\s+splice\s+(\d+(?:\.\d+)*)/i);
-      return match ? match[1] : null;
+    // Monday returns null, "" and "   " interchangeably for an empty cell,
+    // so every read of a version field goes through this.
+    function hasValue(value) {
+      return value !== null && value !== undefined && String(value).trim() !== '';
     }
 
-    // Build a lookup of the current Splice version per network for a given
-    // day. For each network we take the most recent upgrade whose date is
-    // on or before `key`. Networks with no prior upgrade return null.
-    //
-    // Note: this scans ALL events, ignoring the active network/type/search
-    // filters on purpose — the marker always reports the true live version
-    // on every network regardless of what the user has filtered the grid to.
-    function currentSpliceVersions(key) {
-      const target = parseDateKey(key);            // the day we're asking about
-      const result = {};
+    // Compare two dotted version strings numerically: "0.6.10" > "0.6.9".
+    // An 'x' segment ("0.7.x") counts as 0, so an exact patch version always
+    // beats the vaguer minor-only form for the same minor release.
+    // Returns a negative number, 0, or a positive number.
+    function compareVersions(a, b) {
+      const segmentsA = String(a).split('.');
+      const segmentsB = String(b).split('.');
+      const length = Math.max(segmentsA.length, segmentsB.length);
 
-      SPLICE_NETWORKS.forEach(network => {
-        let bestDate = null;                       // date of the winning upgrade
-        let bestVersion = null;                    // its version string
+      for (let i = 0; i < length; i++) {
+        const numberA = parseInt(segmentsA[i], 10) || 0;
+        const numberB = parseInt(segmentsB[i], 10) || 0;
+        if (numberA !== numberB) return numberA - numberB;
+      }
+      return 0;
+    }
 
-        allEvents.forEach(event => {
-          if (normalizeNetwork(event.network) !== network) return;
+    // Which networks an event sets version state for. Returns [] for rows
+    // that should not contribute at all.
+    function versionScope(event) {
+      if (IGNORE_CANCELLED_VERSIONS && event.status === 'Cancelled') return [];
+      const label = normalizeNetwork(event.network) || event.network;
+      return NETWORK_SCOPE[label] || NETWORK_SCOPE[event.network] || [];
+    }
 
-          const version = parseSpliceVersion(event);
-          if (!version) return;                    // not an upgrade event
+    // The minimum validator version an event declares.
+    // Prefers the exact patch version ("0.7.5"); falls back to the minor
+    // version rendered as "0.7.x" when only that column is filled, which is
+    // the wording the tooltip used before these columns existed.
+    function eventMinVersion(event) {
+      if (hasValue(event.minValidatorSpliceVersion)) {
+        return String(event.minValidatorSpliceVersion).trim();
+      }
+      if (hasValue(event.minorVersion)) {
+        return String(event.minorVersion).trim() + '.x';
+      }
+      return null;
+    }
 
-          const eventDate = parseDateKey(eventDatePart(event));
-          if (eventDate > target) return;          // hasn't happened yet on this day
-
-          // Keep the latest upgrade at or before the target day.
-          if (bestDate === null || eventDate > bestDate) {
-            bestDate = eventDate;
-            bestVersion = version;
-          }
-        });
-
-        result[network] = bestVersion;             // null if no upgrade yet
-      });
-
-      return result;
+    // An event's DAR components as [[package, version], ...] — the shape the
+    // tooltip and Day view already expect. Empty array when the cell is blank.
+    function eventDarPairs(event) {
+      const list = Array.isArray(event.minDarVersions) ? event.minDarVersions : [];
+      return list
+        .filter(entry => entry && hasValue(entry.package) && hasValue(entry.version))
+        .map(entry => [String(entry.package).trim(), String(entry.version).trim()]);
     }
 
     /* ---------------------------------------------------------
-       CURRENT DAR VERSIONS (per network, carry-forward)
-       Parallel to currentSpliceVersions, but for the minimum Splice
-       ".dar" component versions. These come from network-tagged events
-       of type "Minimum Splice Dar versions", whose description lists
-       component/version pairs (amulet 0.1.22, wallet 0.1.23, ...).
+       VERSION TIMELINE
+       One pass over every event builds, per network, a date-ordered list
+       of { dateKey, version, dar } records. Both lookups below then read
+       from it, so the whole schedule is walked once per render session
+       rather than once per day cell.
 
-       Only network-tagged DAR events are used (the untagged, all-in-one
-       description events are intentionally ignored — too inconsistent to
-       attribute reliably). Like Splice versions, the most recent DAR set
-       on or before a day carries forward until the next one supersedes it.
+       Several rows can land on the same day for the same network and
+       disagree — a weekly upgrade row and a minimum-version row, for
+       instance. The row declaring the HIGHEST version wins the day, and
+       its DAR list wins with it, so the two numbers shown in the tooltip
+       always come from the same board row instead of being stitched
+       together from different ones.
        --------------------------------------------------------- */
 
-    // Pull component/version pairs out of a DAR event's description.
-    // Returns an array of [component, version], or [] if none found.
-    /* ---------------------------------------------------------
-       DAR VERSION INDEX
-       The Monday board expresses minimum ".dar" component versions in TWO
-       different shapes, so we build a per-day index once, then carry the
-       latest set forward per network.
+    let _versionTimeline = null;
 
-       Format A (June 16 style): a single event whose DESCRIPTION contains
-         "DevNet:\n amulet 0.1.19 ...\n TestNet:\n ...".
+    function buildVersionTimeline() {
+      if (_versionTimeline) return _versionTimeline;
 
-       Format B (June 30 / July 7 / July 14 style): many sibling events on
-         the SAME DAY, each with an empty description — a "DevNet:" header
-         event, then separate events titled "amulet 0.1.20",
-         "amuletNameService 0.1.21", etc., then "TestNet:", and so on.
-         Components belong to the most recent network-header event seen in
-         document order that day.
-
-       Also handles a single network-tagged event whose description holds
-       the list (Aug 10 TestNet). Unlabeled component lists with no network
-       context are ignored.
-       --------------------------------------------------------- */
-
-    // Recognise a "DevNet:" / "TestNet:" / "MainNet:" header (title only).
-    function darNetworkHeader(title) {
-      const m = String(title || '').trim().match(/^(DevNet|TestNet|MainNet)\s*:?\s*$/i);
-      return m ? normalizeNetwork(m[1]) : null;
-    }
-
-    // Recognise a bare "component 0.1.20" title → [comp, ver] or null.
-    function darComponentTitle(title) {
-      const m = String(title || '').trim().match(/^([A-Za-z][A-Za-z]+)\s+(\d+\.\d+\.\d+)\s*$/);
-      return m ? [m[1], m[2]] : null;
-    }
-
-    // Extract per-network component lists from a single description (Format
-    // A / Aug 10). Returns { DevNet: [[c,v]...], ... } or {}.
-    function darFromDescription(event) {
-      const desc = String(event.description || '');
-      if (!desc) return {};
-      const compRe = /([A-Za-z][A-Za-z]+)\s+(\d+\.\d+\.\d+)/g;
-      const result = {};
-      const netRe = /(DevNet|TestNet|MainNet)\s*:/gi;
-      const labels = [];
-      let m;
-      while ((m = netRe.exec(desc)) !== null) {
-        labels.push({ net: normalizeNetwork(m[1]), start: m.index, end: netRe.lastIndex });
-      }
-      if (labels.length) {
-        for (let i = 0; i < labels.length; i++) {
-          const segEnd = (i + 1 < labels.length) ? labels[i + 1].start : desc.length;
-          const seg = desc.slice(labels[i].end, segEnd);
-          const pairs = [];
-          const re = new RegExp(compRe.source, 'g');
-          let c;
-          while ((c = re.exec(seg)) !== null) pairs.push([c[1], c[2]]);
-          if (pairs.length) result[labels[i].net] = pairs;
-        }
-      } else if (event.network) {
-        const pairs = [];
-        let c;
-        while ((c = compRe.exec(desc)) !== null) pairs.push([c[1], c[2]]);
-        if (pairs.length) result[normalizeNetwork(event.network)] = pairs;
-      }
-      return result;
-    }
-
-    // Build { dateKey: { DevNet:[[c,v]...], TestNet:[...], MainNet:[...] } }
-    // across the whole schedule, merging both formats. Cached after first
-    // build since allEvents doesn't change within a render session.
-    let _darIndex = null;
-    function buildDarIndex() {
-      if (_darIndex) return _darIndex;
-      const index = {};
-
-      // Walk events in document order so Format B header→component grouping
-      // works. Track the current network header within each day.
-      let currentDay = null;
-      let currentNet = null;
+      // Stage 1: collect the winning record per network per day.
+      // Shape: { DevNet: { "2026-09-14": {version, dar}, ... }, ... }
+      const byNetwork = {};
+      SPLICE_NETWORKS.forEach(network => { byNetwork[network] = {}; });
 
       allEvents.forEach(event => {
+        const version = eventMinVersion(event);
+        const dar = eventDarPairs(event);
+        if (!version && !dar.length) return;      // nothing to contribute
+
         const dayKey = eventDatePart(event);
-        if (dayKey !== currentDay) { currentDay = dayKey; currentNet = null; }
+        if (!dayKey) return;
 
-        // Format A / Aug 10: description carries the whole thing.
-        const fromDesc = darFromDescription(event);
-        if (Object.keys(fromDesc).length) {
-          index[dayKey] = index[dayKey] || {};
-          Object.entries(fromDesc).forEach(([net, pairs]) => {
-            index[dayKey][net] = (index[dayKey][net] || []).concat(pairs);
-          });
-          return;
-        }
+        versionScope(event).forEach(network => {
+          const days = byNetwork[network];
+          const existing = days[dayKey];
 
-        // Format B: header event sets the current network for the day.
-        const header = darNetworkHeader(event.title);
-        if (header) { currentNet = header; return; }
+          // First record for this day, or this row declares a higher
+          // version than the one already held — take it wholesale.
+          const isHigher = existing && version && existing.version &&
+            compareVersions(version, existing.version) > 0;
 
-        // Format B: component-title event → attach to current network.
-        const comp = darComponentTitle(event.title);
-        if (comp && currentNet) {
-          index[dayKey] = index[dayKey] || {};
-          index[dayKey][currentNet] = (index[dayKey][currentNet] || []);
-          index[dayKey][currentNet].push(comp);
-        }
+          if (!existing || isHigher) {
+            days[dayKey] = { version: version, dar: dar };
+            return;
+          }
+
+          // Same day, not a higher version: keep the incumbent's version but
+          // fill in a DAR list if the incumbent had none. Better a DAR list
+          // from a sibling row than no DAR list at all.
+          if (!existing.dar.length && dar.length) existing.dar = dar;
+          if (!existing.version && version) existing.version = version;
+        });
       });
 
-      _darIndex = index;
-      return index;
+      // Stage 2: flatten each network's map into a date-sorted array.
+      const timeline = {};
+      SPLICE_NETWORKS.forEach(network => {
+        timeline[network] = Object.keys(byNetwork[network])
+          .sort()                                  // ISO dates sort lexically
+          .map(dayKey => ({
+            dateKey: dayKey,
+            version: byNetwork[network][dayKey].version,
+            dar: byNetwork[network][dayKey].dar
+          }));
+      });
+
+      _versionTimeline = timeline;
+      return timeline;
     }
 
-    // For a given day, the current DAR set per network: the most recent
-    // DAR entry (on or before that day) that has data for that network,
-    // carried forward. Returns { DevNet: { components, dateKey }, ... }.
-    function currentDarVersions(key) {
-      const index = buildDarIndex();
-      const target = parseDateKey(key);
+    // Discard the cached timeline. Call this if allEvents is ever reloaded
+    // without a page refresh, otherwise the marker keeps showing stale data.
+    function resetVersionTimeline() {
+      _versionTimeline = null;
+    }
+
+    /**
+     * Minimum validator Splice version per network as of a given day.
+     * Returns { DevNet: "0.7.5"|null, TestNet: ..., MainNet: ... }.
+     *
+     * This intentionally ignores the active network/type/search filters —
+     * the marker always reports the true state of every network regardless
+     * of what the user has narrowed the grid to.
+     */
+    function currentSpliceVersions(key) {
+      const timeline = buildVersionTimeline();
       const result = {};
 
       SPLICE_NETWORKS.forEach(network => {
-        let bestDate = null;
-        let bestComponents = [];
-        let bestKey = null;
+        let carried = null;
 
-        Object.keys(index).forEach(dayKey => {
-          const pairs = index[dayKey][network];
-          if (!pairs || !pairs.length) return;
+        // Records are date-sorted, so walking forward and keeping the last
+        // match at or before `key` gives the carried-forward value.
+        timeline[network].forEach(record => {
+          if (record.dateKey > key) return;        // hasn't happened yet
+          if (record.version) carried = record.version;
+        });
 
-          const eventDate = parseDateKey(dayKey);
-          if (eventDate > target) return;
+        result[network] = carried;
+      });
 
-          if (bestDate === null || eventDate > bestDate) {
-            bestDate = eventDate;
-            bestComponents = pairs;
-            bestKey = dayKey;
+      return result;
+    }
+
+    /**
+     * Minimum DAR component set per network as of a given day.
+     * Returns { DevNet: { components: [[pkg, ver], ...], dateKey }, ... },
+     * where dateKey is the day the set came from — the tooltip links to it
+     * so the full list can be read in the Day view.
+     *
+     * Carried forward separately from the version above: a row may declare a
+     * version without a DAR list, and the last known DAR set should survive
+     * that rather than blanking out.
+     */
+    function currentDarVersions(key) {
+      const timeline = buildVersionTimeline();
+      const result = {};
+
+      SPLICE_NETWORKS.forEach(network => {
+        let components = [];
+        let sourceKey = null;
+
+        timeline[network].forEach(record => {
+          if (record.dateKey > key) return;
+          if (record.dar.length) {
+            components = record.dar;
+            sourceKey = record.dateKey;
           }
         });
 
-        result[network] = { components: bestComponents, dateKey: bestKey };
+        result[network] = { components: components, dateKey: sourceKey };
       });
 
       return result;
