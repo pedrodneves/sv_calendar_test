@@ -1752,25 +1752,30 @@
     function renderListView(root) {
       root.classList.add('list-view');
 
-      // No single "current day" in the full-list model — clear the arrow-nav
-      // title styling and set a plain heading.
+      // The list is scoped to the mini-calendar's current month. Title shows
+      // that month; the calendar's ← → arrows change which month loads.
       const periodTitle = document.getElementById('periodTitle');
       periodTitle.classList.remove('list-nav');
-      periodTitle.textContent = 'All Events';
+      periodTitle.textContent = currentDate.toLocaleDateString('en-US',
+        { month: 'long', year: 'numeric' });
 
-      // --- Left: mini calendar. In list mode it's a JUMP aid — clicking a
-      // day scrolls the list to that date (see buildMiniCalendar). ---
+      // --- Left: mini calendar. Its ← → change the month; clicking a day
+      // scrolls the list to that day within the month. ---
       root.appendChild(buildMiniCalendar());
 
-      // --- Right: the full filtered list, grouped by date ---
+      // --- Right: the filtered list for THIS MONTH, grouped by date ---
       const agenda = document.createElement('div');
       agenda.className = 'agenda';
       agenda.id = 'agendaList';
 
-      // All events matching the current filters (search, network, type,
-      // version, and the optional "on or after" date filter), sorted by
-      // date, grouped into one section per date.
-      const matching = allEvents.filter(matchesFilters);
+      // Only events in the selected month that match the current filters.
+      const y = currentDate.getFullYear();
+      const m = currentDate.getMonth();
+      const monthPrefix = y + '-' + String(m + 1).padStart(2, '0');   // "2026-10"
+
+      const matching = allEvents.filter(e =>
+        eventDatePart(e).startsWith(monthPrefix) && matchesFilters(e));
+
       const byDate = {};
       const dateOrder = [];
       matching.forEach(e => {
@@ -1783,7 +1788,7 @@
       if (!dateOrder.length) {
         const note = document.createElement('div');
         note.className = 'empty-note empty-note-centered';
-        note.textContent = 'No events match your filters.';
+        note.textContent = 'No events this month.';
         root.appendChild(note);
         return;
       }
@@ -1791,7 +1796,7 @@
       dateOrder.forEach(key => {
         const block = document.createElement('div');
         block.className = 'agenda-day';
-        // Anchor id so the mini-calendar / Prev-Next can scroll here.
+        // Anchor id so the mini-calendar can scroll to a day within the month.
         block.id = 'day-' + key;
         block.dataset.date = key;
 
@@ -1942,13 +1947,11 @@
 
     function step(direction) {
       if (listMode) {
-        // Full-list view: Prev/Next scroll the list by month. Move the
-        // reference month, then scroll to the 1st of that month (or the
-        // next event on/after it). No re-render — just scroll.
+        // Month-scoped list: Prev/Next change which month loads. Snap to the
+        // 1st before shifting so a 31st doesn't overflow a shorter month.
         currentDate.setDate(1);
         currentDate.setMonth(currentDate.getMonth() + direction);
-        scrollListToDate(dateKey(currentDate));
-        syncURL();
+        renderWithHistory();
         return;
       } else if (currentView === 'month') {
         // Snap to the 1st before changing month. Otherwise, stepping from a
@@ -1967,12 +1970,8 @@
 
     function goToday() {
       currentDate = new Date();
-      if (listMode) {
-        // In the list, "Today" scrolls to today's events (or the next ones).
-        scrollListToDate(dateKey(currentDate));
-        syncURL();
-        return;
-      }
+      // In the month-scoped list, "Today" loads the current month; in other
+      // views it re-renders normally. Either way a plain re-render suffices.
       renderWithHistory();
     }
 
