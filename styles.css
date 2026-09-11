@@ -695,17 +695,19 @@ select::-ms-expand { display: none; }
   padding: 8px 0;
 }
 
-/* Empty state for the list view: spans the full grid width and centers the
-   message, so it lines up horizontally under the centered date title. */
+/* Empty state: the mini-calendar sits in column 1; the note spans the full
+   width on the SAME grid row and centers, so it aligns under the centered
+   date title while the calendar stays visible on the left. */
+.list-view .mini-cal { grid-row: 1; grid-column: 1; }
 .list-view .empty-note-centered {
+  grid-row: 1;
   grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 200px;
+  align-self: center;
+  justify-self: center;
   font-size: 15px;
   text-align: center;
   padding: 24px;
+  pointer-events: none;   /* clicks pass through to the calendar underneath */
 }
 
 /* ---- Event card -------------------------------------------- */
