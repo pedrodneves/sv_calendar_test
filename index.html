@@ -712,7 +712,7 @@
           }
         });
 
-        result[network] = bestVersion;             // null if no upgrade yet
+        result[network] = { version: bestVersion, dateKey: bestDate ? dateKey(bestDate) : null };
       });
 
       return result;
@@ -912,7 +912,7 @@
       header.textContent = 'Minimum Splice Versions:';
       tip.appendChild(header);
 
-      rows.forEach(([network, version]) => {
+      rows.forEach(([network, version, sourceKey]) => {
         const row = document.createElement('div');
         row.className = 'splice-tooltip-row';
         const name = document.createElement('span');
@@ -923,6 +923,19 @@
         ver.textContent = 'Validators must upgrade to ' + version;
         row.appendChild(name);
         row.appendChild(ver);
+
+        // If we know which day this version came from, make the row a link
+        // that jumps to that day's Day view (same behaviour as DAR rows).
+        if (sourceKey) {
+          row.classList.add('splice-dar-link');
+          row.title = 'Set on ' + sourceKey + ' — click to view';
+          row.addEventListener('click', ev => {
+            ev.stopPropagation();
+            hideSpliceTooltip();
+            jumpToDate(sourceKey);
+          });
+        }
+
         tip.appendChild(row);
       });
 
@@ -1075,9 +1088,12 @@
     function buildSpliceMarker(key) {
       const versions = currentSpliceVersions(key);
 
-      // Store network|version pairs for the shared tooltip to read.
-      const rows = SPLICE_NETWORKS.map(network =>
-        [network, versions[network] || '—']);
+      // Store [network, version, sourceDateKey] so the tooltip can render
+      // each Splice row as a link to the day the upgrade was fetched from.
+      const rows = SPLICE_NETWORKS.map(network => {
+        const entry = versions[network] || { version: null, dateKey: null };
+        return [network, entry.version || '—', entry.dateKey];
+      });
 
       // DAR data per network: [network, components, sourceDateKey], where
       // components is the full [name, version] list. The tooltip (Option B)
