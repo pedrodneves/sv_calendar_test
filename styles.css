@@ -1014,3 +1014,66 @@ select::-ms-expand { display: none; }
     gap: 8px;
   }
 }
+
+/* ---- DAR package list inside the version tooltip -------------
+   The tooltip used to show only a count ("6 DAR versions") and link
+   out to the Day view. It now lists every package inline, grouped by
+   network, so the whole minimum set is readable without navigating
+   away. Each group keeps a small provenance line naming the day the
+   set was declared, since a set is usually carried forward from an
+   earlier day rather than set on the day being viewed. -------- */
+
+/* One network's block: its name, its packages, its provenance line. */
+.splice-dar-group {
+  margin-bottom: 9px;
+}
+.splice-dar-group:last-of-type {
+  margin-bottom: 0;
+}
+
+/* Network name heading a block. Colours match the rows above it so the
+   same network reads as the same colour throughout the tooltip. */
+.splice-dar-net {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.9;
+}
+.splice-dar-net.devnet  { color: #6ea8ff; }
+.splice-dar-net.testnet { color: #e6c34a; }
+.splice-dar-net.mainnet { color: #4caf7d; }
+
+/* Package rows sit indented under their network heading. */
+.splice-dar-row {
+  padding-left: 10px;
+  line-height: 1.6;
+}
+
+/* Package names are secondary to their version numbers, which are the
+   thing being looked up. */
+.splice-dar-pkg {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* "set 2026-09-14 →" — which day this set came from. */
+.splice-dar-source {
+  padding-left: 10px;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--purple-soft);
+  opacity: 0.75;
+  cursor: pointer;
+}
+.splice-tooltip.pinned .splice-dar-source:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* With three networks listed in full the tooltip is much taller than
+   before, so it gets a scroll ceiling rather than running off-screen.
+   Only a pinned tooltip can be scrolled, since an unpinned one does not
+   receive pointer events. */
+.splice-tooltip {
+  max-height: 70vh;
+  overflow-y: auto;
+}

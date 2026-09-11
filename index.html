@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- CSS now lives in its own file (was previously inline). -->
-  <link rel="stylesheet" href="./styles.css?v=25" />
+  <link rel="stylesheet" href="./styles.css?v=26" />
 </head>
 
 <body>
@@ -926,11 +926,13 @@
         tip.appendChild(row);
       });
 
-      // DAR section: one line per network that has DAR data, showing the
-      // component count, linking to the day it came from. Full lists live
-      // in that Day view. Networks with no DAR data are omitted.
+      // DAR section: every network that has DAR data gets a labelled block
+      // listing each package and its minimum version. The set is carried
+      // forward from the most recent day that declared one, so each block
+      // is footnoted with the day it came from — clicking that opens the
+      // Day view for it. Networks with no DAR data are omitted entirely.
       const darRows = JSON.parse(marker.dataset.dar || '[]');
-      const darWithData = darRows.filter(([, count]) => count > 0);
+      const darWithData = darRows.filter(([, components]) => components.length > 0);
 
       if (darWithData.length) {
         const darHeader = document.createElement('div');
@@ -938,29 +940,46 @@
         darHeader.textContent = 'Minimum DAR versions:';
         tip.appendChild(darHeader);
 
-        darWithData.forEach(([network, count, sourceKey]) => {
-          const row = document.createElement('div');
-          row.className = 'splice-tooltip-row splice-dar-link';
-          const name = document.createElement('span');
-          name.className = 'splice-tooltip-net ' + networkClass(network);
-          name.textContent = network;
-          const val = document.createElement('span');
-          val.className = 'splice-tooltip-ver';
-          // e.g. "6 DAR versions →" — click opens the source day.
-          val.textContent = count + ' DAR versions →';
-          row.appendChild(name);
-          row.appendChild(val);
+        darWithData.forEach(([network, components, sourceKey]) => {
+          const group = document.createElement('div');
+          group.className = 'splice-dar-group';
 
-          // Clicking the row opens the Day view of the event this DAR set
-          // came from, where the full component list is shown.
+          // Network name heads the block; packages are indented beneath it.
+          const label = document.createElement('div');
+          label.className = 'splice-dar-net ' + networkClass(network);
+          label.textContent = network;
+          group.appendChild(label);
+
+          components.forEach(([packageName, version]) => {
+            const row = document.createElement('div');
+            row.className = 'splice-tooltip-row splice-dar-row';
+
+            const name = document.createElement('span');
+            name.className = 'splice-dar-pkg';
+            name.textContent = packageName;
+
+            const value = document.createElement('span');
+            value.className = 'splice-tooltip-ver';
+            value.textContent = version;
+
+            row.appendChild(name);
+            row.appendChild(value);
+            group.appendChild(row);
+          });
+
+          // Provenance line. Clicking jumps to the day the set was declared.
           if (sourceKey) {
-            row.addEventListener('click', () => {
+            const source = document.createElement('div');
+            source.className = 'splice-dar-source splice-dar-link';
+            source.textContent = 'set ' + sourceKey + ' \u2192';
+            source.addEventListener('click', () => {
               hideSpliceTooltip();
               jumpToDate(sourceKey);   // opens Day view at that date
             });
+            group.appendChild(source);
           }
 
-          tip.appendChild(row);
+          tip.appendChild(group);
         });
       }
 
@@ -1027,7 +1046,7 @@
       const dar = currentDarVersions(key);
       const darRows = SPLICE_NETWORKS.map(network => {
         const entry = dar[network] || { components: [], dateKey: null };
-        return [network, entry.components.length, entry.dateKey];
+        return [network, entry.components, entry.dateKey];
       });
 
       const marker = document.createElement('div');
