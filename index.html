@@ -58,6 +58,10 @@
           </select>
           <button class="info-btn" onclick="toggleInfo()" title="Activity type definitions">i</button>
         </div>
+
+        <select id="versionFilter">
+          <option value="">All versions</option>
+        </select>
       </div>
 
       <!-- Row 3: utility actions, right-aligned -->
@@ -169,6 +173,7 @@
 
       populateNetworkFilter();
       populateTypeFilter();
+      populateVersionFilter();
 
       // Restore any filters/view/date from a shared link. Must run after
       // the dropdowns are populated so their option values exist.
@@ -340,10 +345,13 @@
       const search = document.getElementById('search').value.trim();
       const network = document.getElementById('networkFilter').value;
       const type = document.getElementById('typeFilter').value;
+      const versionEl = document.getElementById('versionFilter');
+      const version = versionEl ? versionEl.value : '';
 
       if (search) params.set('search', search);
       if (network) params.set('network', network);
       if (type) params.set('type', type);
+      if (version) params.set('version', version);
 
       // View: 'list' takes precedence when list mode is on.
       const view = listMode ? 'list' : currentView;
@@ -396,6 +404,14 @@
       const typeSel = document.getElementById('typeFilter');
       typeSel.value =
         (type && [...typeSel.options].some(o => o.value === type)) ? type : '';
+
+      // Version filter: absent or invalid → "all".
+      const version = params.get('version');
+      const verSel = document.getElementById('versionFilter');
+      if (verSel) {
+        verSel.value =
+          (version && [...verSel.options].some(o => o.value === version)) ? version : '';
+      }
 
       // View: absent → Month (default). 'list' toggles list mode.
       const view = params.get('view');
@@ -615,15 +631,42 @@
       select.value = currentValue;
     }
 
-    /* ---------------------------------------------------------
-       FILTERING
-       Returns every event that matches the search box and the
-       two dropdown filters (network + activity type).
-       --------------------------------------------------------- */
+    // Populate the minor-version filter from the structured `minorVersion`
+    // field published from monday's "Minor Versions" column. Values look
+    // like "0.7", "0.8", "0.10". Events with no version (null) are simply
+    // not represented as options. Sorted numerically so "0.10" comes after
+    // "0.9" (a plain string sort would misorder them).
+    function populateVersionFilter() {
+      const select = document.getElementById('versionFilter');
+      if (!select) return;
+      const currentValue = select.value;
+
+      select.innerHTML = '<option value="">All versions</option>';
+
+      const versions = [...new Set(
+        allEvents.map(event => event.minorVersion).filter(Boolean)
+      )].sort((a, b) => {
+        // Compare as [major, minor] number pairs, not as strings.
+        const pa = String(a).split('.').map(Number);
+        const pb = String(b).split('.').map(Number);
+        return (pa[0] - pb[0]) || ((pa[1] || 0) - (pb[1] || 0));
+      });
+
+      versions.forEach(version => {
+        const option = document.createElement('option');
+        option.value = version;
+        option.textContent = 'Splice ' + version + '.x';
+        select.appendChild(option);
+      });
+
+      select.value = currentValue;
+    }
     function matchesFilters(event) {
       const search = document.getElementById('search').value.toLowerCase();
       const selectedNetwork = document.getElementById('networkFilter').value;
       const selectedType = document.getElementById('typeFilter').value;
+      const versionEl = document.getElementById('versionFilter');
+      const selectedVersion = versionEl ? versionEl.value : '';
 
       const normalizedNetwork = normalizeNetwork(event.network);
 
@@ -634,7 +677,10 @@
 
       return searchable.includes(search) &&
         (!selectedNetwork || normalizedNetwork === selectedNetwork) &&
-        (!selectedType || event.type === selectedType);
+        (!selectedType || event.type === selectedType) &&
+        // When a version is selected, show ONLY events with that exact minor
+        // version; events without a version (null) are hidden.
+        (!selectedVersion || String(event.minorVersion) === selectedVersion);
     }
 
     // All events on a given date key (filters applied).
@@ -1868,6 +1914,8 @@
       document.getElementById('search').value = '';
       document.getElementById('networkFilter').value = '';
       document.getElementById('typeFilter').value = '';
+      const vf = document.getElementById('versionFilter');
+      if (vf) vf.value = '';
       // Reset also returns to the default Month view (leaving List/Week/Day)
       // AND jumps back to today, so Reset always lands on the current month
       // rather than whatever month you'd navigated to.
@@ -1933,6 +1981,7 @@
     // Changing a filter is a discrete action → push a history entry.
     document.getElementById('networkFilter').addEventListener('change', renderWithHistory);
     document.getElementById('typeFilter').addEventListener('change', renderWithHistory);
+    document.getElementById('versionFilter').addEventListener('change', renderWithHistory);
 
     // Browser Back/Forward: re-apply the state the URL now describes, then
     // render without touching history (plain render → replaceState).
