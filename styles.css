@@ -383,19 +383,21 @@ select::-ms-expand { display: none; }
 /* Fixed width so the arrows don't shift as the date text length changes
    (e.g. "May 1" vs "September 12"). The date is centered within it, and
    the "i" marker is pinned to the right edge, aligned with the date. */
+/* Date + "i" group. A min-width (not a fixed width) keeps the arrows from
+   collapsing inward on short dates, while the "i" sits inline after the
+   date with a real gap so it never overlaps the text. */
 .list-nav-date {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  width: 460px;
-  max-width: 60vw;
-  position: relative;
+  gap: 12px;
+  min-width: 480px;
+  max-width: 70vw;
 }
 .list-nav-date > span:first-child { white-space: nowrap; }
 .list-nav-date .splice-marker {
-  position: absolute;
-  right: 0;            /* pin "i" to the right, aligned with the date row */
+  flex: 0 0 auto;   /* stays a fixed-size circle, right of the date */
+  margin-left: 0;
 }
 
 /* ---- Month grid -------------------------------------------- */
@@ -693,17 +695,19 @@ select::-ms-expand { display: none; }
   padding: 8px 0;
 }
 
-/* Empty state for the list view — spans both grid columns and centers the
-   message across the full width, so it lines up under the date title. */
-.empty-note-fullwidth {
-  grid-column: 1 / -1;
+/* Empty state for the list view: the agenda column holds just the note,
+   centered horizontally and vertically. A min-height roughly matching the
+   mini-calendar keeps it level with the calendar and under the date. */
+.agenda-empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 180px;
-  padding: 24px;
+  min-height: 300px;
+}
+.empty-note-centered {
   font-size: 15px;
   text-align: center;
+  padding: 24px;
 }
 
 /* ---- Event card -------------------------------------------- */
