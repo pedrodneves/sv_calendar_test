@@ -272,6 +272,45 @@ select::-ms-expand { display: none; }
 }
 .info-btn:hover { border-color: var(--purple-soft); color: var(--purple-soft); }
 
+/* Optional "on or after" date filter — matches the other filter controls.
+   The ✕ clears it. Highlighted when a date is set is handled inline. */
+.date-filter-cell {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #0c0a18;
+  border: 1px solid rgba(201, 156, 255, 0.35);
+  border-radius: 12px;
+  padding: 0 10px;
+  align-self: stretch;
+}
+.date-filter-label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.date-filter-input {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 0;
+  color-scheme: dark;   /* dark native date picker */
+}
+.date-filter-input:focus { outline: none; }
+.date-filter-clear {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 5px;
+}
+.date-filter-clear:hover { color: var(--purple-soft); }
+
 /* Info popover (hidden until toggled) — centered modal */
 .info-popover {
   position: fixed;

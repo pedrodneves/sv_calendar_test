@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- CSS now lives in its own file (was previously inline). -->
-  <link rel="stylesheet" href="./styles.css?v=30" />
+  <link rel="stylesheet" href="./styles.css?v=31" />
 </head>
 
 <body>
@@ -59,6 +59,12 @@
         <select id="versionFilter">
           <option value="">All versions</option>
         </select>
+
+        <div class="date-filter-cell">
+          <label for="afterDate" class="date-filter-label">On or after</label>
+          <input type="date" id="afterDate" class="date-filter-input" />
+          <button id="clearAfterDate" class="date-filter-clear" title="Clear date filter" aria-label="Clear date filter">✕</button>
+        </div>
 
         <button class="info-btn" onclick="toggleInfo()" title="Activity type definitions">i</button>
       </div>
@@ -346,11 +352,14 @@
       const type = document.getElementById('typeFilter').value;
       const versionEl = document.getElementById('versionFilter');
       const version = versionEl ? versionEl.value : '';
+      const afterEl = document.getElementById('afterDate');
+      const after = afterEl ? afterEl.value : '';
 
       if (search) params.set('search', search);
       if (network) params.set('network', network);
       if (type) params.set('type', type);
       if (version) params.set('version', version);
+      if (after) params.set('after', after);
 
       // View: 'list' takes precedence when list mode is on.
       const view = listMode ? 'list' : currentView;
@@ -410,6 +419,13 @@
       if (verSel) {
         verSel.value =
           (version && [...verSel.options].some(o => o.value === version)) ? version : '';
+      }
+
+      // Optional "on or after" date filter: absent → cleared.
+      const after = params.get('after');
+      const afterEl = document.getElementById('afterDate');
+      if (afterEl) {
+        afterEl.value = (after && /^\d{4}-\d{2}-\d{2}$/.test(after)) ? after : '';
       }
 
       // View: absent → Month (default). 'list' toggles list mode.
@@ -666,6 +682,8 @@
       const selectedType = document.getElementById('typeFilter').value;
       const versionEl = document.getElementById('versionFilter');
       const selectedVersion = versionEl ? versionEl.value : '';
+      const afterEl = document.getElementById('afterDate');
+      const afterDate = afterEl ? afterEl.value : '';   // "YYYY-MM-DD" or ''
 
       const normalizedNetwork = normalizeNetwork(event.network);
 
@@ -679,7 +697,10 @@
         (!selectedType || event.type === selectedType) &&
         // When a version is selected, show ONLY events with that exact minor
         // version; events without a version (null) are hidden.
-        (!selectedVersion || String(event.minorVersion) === selectedVersion);
+        (!selectedVersion || String(event.minorVersion) === selectedVersion) &&
+        // Optional "on or after" date filter — off when empty. String
+        // comparison works because both are ISO YYYY-MM-DD.
+        (!afterDate || eventDatePart(event) >= afterDate);
     }
 
     // All events on a given date key (filters applied).
@@ -1731,64 +1752,77 @@
     function renderListView(root) {
       root.classList.add('list-view');
 
-      const dayKey = dateKey(currentDate);
-
-      // Build the title bar: ‹ [date] (i) › — back/forward arrows flanking
-      // the white date, with the Splice version marker beside it. Rendered
-      // into the shared periodTitle so it sits where every view's title is.
+      // No single "current day" in the full-list model — clear the arrow-nav
+      // title styling and set a plain heading.
       const periodTitle = document.getElementById('periodTitle');
-      periodTitle.textContent = '';           // clear any plain text
-      periodTitle.classList.add('list-nav');
+      periodTitle.classList.remove('list-nav');
+      periodTitle.textContent = 'All Events';
 
-      const prevBtn = document.createElement('button');
-      prevBtn.className = 'list-nav-arrow';
-      prevBtn.setAttribute('aria-label', 'Previous day');
-      prevBtn.textContent = '‹';
-      prevBtn.onclick = () => step(-1);
+      // --- Left: mini calendar. In list mode it's a JUMP aid — clicking a
+      // day scrolls the list to that date (see buildMiniCalendar). ---
+      root.appendChild(buildMiniCalendar());
 
-      const dateWrap = document.createElement('span');
-      dateWrap.className = 'list-nav-date';
-      const dateText = document.createElement('span');
-      dateText.textContent = longDate(dayKey);
-      dateWrap.appendChild(dateText);
-      dateWrap.appendChild(buildSpliceMarker(dayKey));   // keep the "i"
+      // --- Right: the full filtered list, grouped by date ---
+      const agenda = document.createElement('div');
+      agenda.className = 'agenda';
+      agenda.id = 'agendaList';
 
-      const nextBtn = document.createElement('button');
-      nextBtn.className = 'list-nav-arrow';
-      nextBtn.setAttribute('aria-label', 'Next day');
-      nextBtn.textContent = '›';
-      nextBtn.onclick = () => step(1);
+      // All events matching the current filters (search, network, type,
+      // version, and the optional "on or after" date filter), sorted by
+      // date, grouped into one section per date.
+      const matching = allEvents.filter(matchesFilters);
+      const byDate = {};
+      const dateOrder = [];
+      matching.forEach(e => {
+        const k = eventDatePart(e);
+        if (!byDate[k]) { byDate[k] = []; dateOrder.push(k); }
+        byDate[k].push(e);
+      });
+      dateOrder.sort();
 
-      periodTitle.appendChild(prevBtn);
-      periodTitle.appendChild(dateWrap);
-      periodTitle.appendChild(nextBtn);
-
-      // Events on the selected day (eventsOnDate already applies filters).
-      const dayEvents = eventsOnDate(dayKey);
-
-      if (dayEvents.length) {
-        // --- Left: mini calendar (jump to any day) ---
-        root.appendChild(buildMiniCalendar());
-
-        // --- Right: agenda for the SELECTED DAY only ---
-        const agenda = document.createElement('div');
-        agenda.className = 'agenda';
-        const block = document.createElement('div');
-        block.className = 'agenda-day';
-        renderGroupedByType(block, dayEvents, { showConnected: true });
-        agenda.appendChild(block);
-        root.appendChild(agenda);
-      } else {
-        // Empty day: keep the mini-calendar (left) for navigation, and
-        // center the "No events" note under the date across the full width.
-        // The note spans both grid columns and centers, so it lines up with
-        // the centered date title rather than sitting in the agenda column.
-        root.appendChild(buildMiniCalendar());
+      if (!dateOrder.length) {
         const note = document.createElement('div');
         note.className = 'empty-note empty-note-centered';
-        note.textContent = 'No events on this day.';
+        note.textContent = 'No events match your filters.';
         root.appendChild(note);
+        return;
       }
+
+      dateOrder.forEach(key => {
+        const block = document.createElement('div');
+        block.className = 'agenda-day';
+        // Anchor id so the mini-calendar / Prev-Next can scroll here.
+        block.id = 'day-' + key;
+        block.dataset.date = key;
+
+        // Date heading with the Splice "i" marker at the right.
+        const dateRow = document.createElement('div');
+        dateRow.className = 'agenda-date-row';
+        const dateEl = document.createElement('div');
+        dateEl.className = 'agenda-date';
+        dateEl.textContent = longDate(key);
+        dateRow.appendChild(dateEl);
+        dateRow.appendChild(buildSpliceMarker(key));
+        block.appendChild(dateRow);
+
+        renderGroupedByType(block, byDate[key], { showConnected: true });
+        agenda.appendChild(block);
+      });
+
+      root.appendChild(agenda);
+    }
+
+    // Scroll the list to the first date section on or after the given key.
+    // Used by the mini-calendar and the Prev/Today/Next buttons in list mode.
+    function scrollListToDate(key) {
+      const agenda = document.getElementById('agendaList');
+      if (!agenda) return;
+      const blocks = [...agenda.querySelectorAll('.agenda-day')];
+      // Exact match first, else the next date after it.
+      let target = blocks.find(b => b.dataset.date === key);
+      if (!target) target = blocks.find(b => b.dataset.date >= key);
+      if (!target) target = blocks[blocks.length - 1];   // past the end → last
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     // "Jul 6, 2026" style label used in the list title.
@@ -1882,7 +1916,11 @@
         if (dayDate.getMonth() !== month) {
           cell.classList.add('outside');
         } else {
-          cell.onclick = () => jumpToDate(key, /*keepList*/ true);
+          // In list mode, clicking a day SCROLLS the full list to that date
+          // (it doesn't limit the list). Elsewhere it opens the Day view.
+          cell.onclick = listMode
+            ? () => { currentDate = parseDateKey(key); scrollListToDate(key); syncURL(); }
+            : () => jumpToDate(key, /*keepList*/ true);
         }
 
         if (key === selectedKey) cell.classList.add('selected');
@@ -1904,8 +1942,14 @@
 
     function step(direction) {
       if (listMode) {
-        // List view shows a single day, so Prev/Next move by one day.
-        currentDate.setDate(currentDate.getDate() + direction);
+        // Full-list view: Prev/Next scroll the list by month. Move the
+        // reference month, then scroll to the 1st of that month (or the
+        // next event on/after it). No re-render — just scroll.
+        currentDate.setDate(1);
+        currentDate.setMonth(currentDate.getMonth() + direction);
+        scrollListToDate(dateKey(currentDate));
+        syncURL();
+        return;
       } else if (currentView === 'month') {
         // Snap to the 1st before changing month. Otherwise, stepping from a
         // 31st into a shorter month (e.g. Aug 31 -> Sep) overflows to the
@@ -1923,6 +1967,12 @@
 
     function goToday() {
       currentDate = new Date();
+      if (listMode) {
+        // In the list, "Today" scrolls to today's events (or the next ones).
+        scrollListToDate(dateKey(currentDate));
+        syncURL();
+        return;
+      }
       renderWithHistory();
     }
 
@@ -1934,6 +1984,8 @@
       document.getElementById('typeFilter').value = '';
       const vf = document.getElementById('versionFilter');
       if (vf) vf.value = '';
+      const af = document.getElementById('afterDate');
+      if (af) af.value = '';
       // Reset also returns to the default Month view (leaving List/Week/Day)
       // AND jumps back to today, so Reset always lands on the current month
       // rather than whatever month you'd navigated to.
@@ -2000,6 +2052,12 @@
     document.getElementById('networkFilter').addEventListener('change', renderWithHistory);
     document.getElementById('typeFilter').addEventListener('change', renderWithHistory);
     document.getElementById('versionFilter').addEventListener('change', renderWithHistory);
+    // Optional "on or after" date filter.
+    document.getElementById('afterDate').addEventListener('change', renderWithHistory);
+    document.getElementById('clearAfterDate').addEventListener('click', () => {
+      document.getElementById('afterDate').value = '';
+      renderWithHistory();
+    });
 
     // Browser Back/Forward: re-apply the state the URL now describes, then
     // render without touching history (plain render → replaceState).
