@@ -695,16 +695,14 @@ select::-ms-expand { display: none; }
   padding: 8px 0;
 }
 
-/* Empty state for the list view: the agenda column holds just the note,
-   centered horizontally and vertically. A min-height roughly matching the
-   mini-calendar keeps it level with the calendar and under the date. */
-.agenda-empty {
+/* Empty state for the list view: spans the full grid width and centers the
+   message, so it lines up horizontally under the centered date title. */
+.list-view .empty-note-centered {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 300px;
-}
-.empty-note-centered {
+  min-height: 200px;
   font-size: 15px;
   text-align: center;
   padding: 24px;

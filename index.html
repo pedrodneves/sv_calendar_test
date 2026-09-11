@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- CSS now lives in its own file (was previously inline). -->
-  <link rel="stylesheet" href="./styles.css?v=28" />
+  <link rel="stylesheet" href="./styles.css?v=29" />
 </head>
 
 <body>
@@ -1779,17 +1779,13 @@
         agenda.appendChild(block);
         root.appendChild(agenda);
       } else {
-        // Empty day: mini calendar on the left; the "No events" note in the
-        // agenda column so it sits level with the calendar and centered
-        // under the date (not stranded below everything).
-        root.appendChild(buildMiniCalendar());
-        const agenda = document.createElement('div');
-        agenda.className = 'agenda agenda-empty';
+        // Empty day: note centered across the FULL view width so it lines
+        // up horizontally under the centered date title. No mini-calendar
+        // column pushing it off to the side.
         const note = document.createElement('div');
         note.className = 'empty-note empty-note-centered';
         note.textContent = 'No events on this day.';
-        agenda.appendChild(note);
-        root.appendChild(agenda);
+        root.appendChild(note);
       }
     }
 
